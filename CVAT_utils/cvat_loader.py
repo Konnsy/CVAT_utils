@@ -39,6 +39,120 @@ class CVATLoaderUtil:
 
         self.loadAnnotations()
 
+
+    def convertToOtherWindowSize(self, newWindowSize):
+        if newWindowSize == 100:
+            return
+
+        self.stretch = newWindowSize / 100
+        self.convertAnnotationLengthsByFactor()
+        
+        def convertAnnotationLengthsByFactor(self):        
+        iouThreshold = 0.1
+        distTolerance = 10
+        minLenTraces = 15
+         
+        if self.stretch <= 0:
+            raise ValueError("window size factors must be values > 0!")
+
+        factor = self.stretch
+        fileNames = list(self.annotationData.keys())
+
+        # calculate traces of the current annotations
+        bbt = self.boxTracerFromAnnotations(fileNames, minLenTraces, iouThreshold, distTolerance)
+        oldTraces = bbt.getCalculatedTraces(withFillUps=True, onlyCompleted=True, alsoInvalidated=False)
+        
+        annot = copy.deepcopy(self.annotationData)
+
+        # fileName -> [id, polygons, boxes, mask]
+        self.annotationData = collections.OrderedDict()
+        for fileName in fileNames:
+            self.annotationData[fileName] = [id, [], [], np.zeros((self.width, self.height), dtype=np.uint8)]
+
+        for framesOld, boxesOld in oldTraces:          
+            assert len(boxesOld) > 0
+
+            # old meta info for the whole trace
+            startOld = min(framesOld)
+            endOld = max(framesOld)
+            spanOld = endOld - startOld     
+            centerOld = int((startOld + endOld) * 0.5)
+            
+            # new meta info for the whole trace
+            centerNew = centerOld
+            spanNew = int(spanOld * factor + 0.5)
+            startNew = centerNew - math.ceil(spanNew * 0.5)
+            endNew = centerNew + math.floor(spanNew * 0.5)
+
+            centerNew = max(0, min(len(fileNames)-1, centerNew))
+            startNew = max(0, min(len(fileNames)-1, startNew))
+            endNew = max(0, min(len(fileNames)-1, endNew))
+
+            for frameNew in range(startNew, endNew):
+                relPosition = float(frameNew - startNew) / spanNew
+                newName = fileNames[frameNew]                
+                frameOld = int(startOld * (1.0 - relPosition) + endOld * relPosition)
+                frameOldInner = frameOld - startOld
+                oldName = fileNames[frameOld]
+
+                # smoothen annotations
+                colFrom = max(0, frameOldInner - 2)
+                colTo = min(spanOld, frameOldInner + 2)
+                colBoxes = [boxesOld[frcb] for frcb in range(colFrom, colTo+1)]
+                colBox = [
+                            statistics.mean([c[0] for c in colBoxes]),
+                            statistics.mean([c[1] for c in colBoxes]),
+                            statistics.mean([c[2] for c in colBoxes]),
+                            statistics.mean([c[3] for c in colBoxes]),
+                         ]
+
+                # elements: id, polygons, boxes, mask
+                self.annotationData[newName][2].append(colBox)
+
+        self.boxesToEllipses(alsoPolys=True)
+        
+        fileNames = list(self.annotationData.keys())
+        for fileName in fileNames:
+            polys = self.annotationData[fileName][1]
+            boxes = self.annotationData[fileName][2]
+            boxesNew = []
+            polysNew = []
+
+            # take the first box and poly of each clique of boxes
+            # determined by their iou values
+            cliques = mergeableBoxCliquesByIoU(boxes, iouThreshold=iouThreshold)            
+            for clique in cliques:
+                boxesNew.append(boxes[clique[0]])
+                polysNew.append(polys[clique[0]])                
+
+            self.annotationData[fileName][1] = polysNew
+            self.annotationData[fileName][2] = boxesNew
+            
+            
+    def boxesToEllipses(self, alsoPolys=False, sizeFactors=(1,1)):
+        for fileName in self.annotationData.keys():
+            [id, polygons, boxes, mask] = self.annotationData[fileName]
+            if len(polygons)==0 and len(boxes)>0:
+                polygons = [ [] for _ in boxes]
+
+            mergedMask = np.zeros_like(mask)
+            modPolygons = []
+
+            for poly, box in zip(polygons, boxes):
+                box = [box[1], box[0], box[3], box[2]]
+                if len(poly)==0 or (len(poly) in list(range(3,8))) or alsoPolys:
+                    # polygon representing a box
+                    mergedMask, polyEl = drawEllipseFromBox(mergedMask, box, sizeFactors)
+                    modPolygons.append(polyEl)
+                else:
+                    # not representing a box
+                    mask = maskImgFromPolygons([poly], mergedMask.shape[0], mergedMask.shape[1])
+                    mergedMask = ((mask + mergedMask) > 0).astype(np.uint8)
+                    modPolygons.append(poly)
+    
+            mergedMask = mergedMask.transpose(1,0)
+            self.annotationData[fileName] = [id, modPolygons, boxes, mergedMask]
+
     def getFileNames(self):
         return list(self.annotationData.keys())
 
