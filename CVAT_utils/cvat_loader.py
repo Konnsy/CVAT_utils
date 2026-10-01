@@ -302,27 +302,7 @@ def maskFromPolygon(data, pixelValue=1, heightFirst=True):
 
     return mask
 
-    #if len(polygon) == 0:
-    #    if heightFirst:
-    #        return np.zeros(shape=(height, width), dtype=np.uint8)
-    #    else:
-    #        return np.zeros(shape=(width, height), dtype=np.uint8)
-
-    #poly_path = Path(polygon)
-    #x, y = np.mgrid[:height, :width]
-    #coords = np.hstack((x.reshape(-1, 1), y.reshape(-1, 1)))
-    #mask = poly_path.contains_points(coords)
-    #mask = mask.reshape(height, width)
-
-    #mask = mask.astype(np.uint8)
-    #mask *= pixelValue
-
-    #if not heightFirst:
-    #    mask = mask.transpose(1, 0)
-
-    #return mask
-
-
+    
 def scale(x, out_range=(-1, 1)):
     domain = np.min(x), np.max(x)
 
