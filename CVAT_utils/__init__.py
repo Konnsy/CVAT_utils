@@ -1,1 +1,1 @@
-from .cvat_loader import CVATLoader
+﻿from .cvat_loader import CVATLoaderUtil
